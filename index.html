@@ -35,6 +35,8 @@
     <main class="main" aria-label="Contenido principal">
       <section class="timerCard" aria-label="Timer">
         <div class="ringWrap" role="button" tabindex="0" id="btnCentral" aria-label="INICIAR">
+          <div id="ringPulse" class="ringPulse" aria-hidden="true"></div>
+
           <svg class="ring" viewBox="0 0 220 220" aria-hidden="true">
             <defs>
               <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -47,23 +49,20 @@
             </defs>
             <circle class="ring__track" cx="110" cy="110" r="86" />
             <circle class="ring__progress" id="ringProgress" cx="110" cy="110" r="86" />
-            <circle class="ring__cap" id="ringCap" cx="110" cy="24" r="3.5" />
+            <circle class="cap" id="ringCap" cx="110" cy="24" r="3.5" />
           </svg>
 
-          <div class="timerText">
-            <div id="timerAction" class="timerAction">INICIAR</div>
-            <div id="timerTime" class="timerTime">--:--</div>
-            <div class="timerSub">
-              <span id="timerEnd">Termina --:--</span>
-              <span class="dotSep">•</span>
-              <span id="timerMeta">Libre</span>
-            </div>
-            <div id="timerLate" class="timerLate" hidden>Fuera de horario</div>
+          <div class="centerContent" aria-hidden="false">
+            <div id="actionLabel" class="centerAction">INICIAR</div>
+            <div id="timerValue" class="centerTime">--:--</div>
+            <div id="etaValue" class="centerSub">Termina --:--</div>
+            <div id="metaValue" class="centerMeta">Libre</div>
+            <div id="overtimeTag" class="overtimeTag" hidden>Fuera de horario</div>
           </div>
         </div>
       </section>
 
-      <section class="queue" aria-label="En espera">
+      <section class="queue queueCard" aria-label="En espera">
         <div class="queueHeader">
           <h2 class="queueTitle">En espera</h2>
           <button id="btnAdd" class="addBtn" type="button">Agregar cliente</button>

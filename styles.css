@@ -87,6 +87,25 @@ body{
 }
 .ringWrap:focus-visible{box-shadow: 0 0 0 3px rgba(79,209,255,.25)}
 
+/* subtle pulse/glow behind the ring (driven by JS opacity) */
+.ringPulse{
+  position:absolute;
+  inset: 6px;
+  border-radius: 999px;
+  background: radial-gradient(closest-side, rgba(79,209,255,.16), transparent 62%);
+  filter: blur(8px);
+  opacity: .65;
+  pointer-events:none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.overtimeTag{
+  margin-top: 10px;
+  font-size: 12px;
+  letter-spacing: .02em;
+  color: rgba(255,43,58,.92);
+}
+
 .ring{width:min(320px, 84vw); height:auto; display:block;}
 
 .ring__track{stroke: rgba(234,242,248,.09); stroke-width: 10;}
