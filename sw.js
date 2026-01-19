@@ -1,4 +1,4 @@
-'use strict';
+/* Barber Turnos - Service Worker */
 
 const CACHE_NAME = 'barber-turnos-v1';
 const CORE_ASSETS = [
@@ -13,41 +13,52 @@ const CORE_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
   );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-    )).then(() => self.clients.claim())
+    caches.keys().then(async (keys) => {
+      await Promise.all(
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+      );
+      await self.clients.claim();
+    })
   );
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
-
   const url = new URL(req.url);
-  const sameOrigin = url.origin === self.location.origin;
 
-  // Cache-first para core assets y navegación offline
-  if (sameOrigin) {
+  // Only handle same-origin
+  if (url.origin !== self.location.origin) return;
+
+  // HTML: network-first, fallback cache
+  if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
     event.respondWith(
-      caches.match(req).then((cached) => {
-        if (cached) return cached;
-        return fetch(req).then((res) => {
-          // Guardar en cache lo que sea estático
+      fetch(req)
+        .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy)).catch(() => {});
+          caches.open(CACHE_NAME).then((c) => c.put('./index.html', copy));
           return res;
-        }).catch(() => {
-          // Fallback: devolver index para navegación
-          if (req.mode === 'navigate') return caches.match('./index.html');
-          return cached;
-        });
-      })
+        })
+        .catch(() => caches.match('./index.html'))
     );
+    return;
   }
+
+  // Other assets: cache-first, then network
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then((c) => c.put(req, copy));
+        return res;
+      });
+    })
+  );
 });

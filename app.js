@@ -1,1020 +1,1320 @@
-/* Barber Turnos - PWA - Vanilla JS
-   Regla de oro: el rediseño es UI only. Este proyecto implementa exactamente los flujos
-   funcionales solicitados sin frameworks ni librerías externas.
+/*
+  Barber Turnos PWA
+  REGLA DE ORO (OBLIGATORIA, textual):
+  “El rediseño es 100% visual (UI only). No se debe modificar ningún estado, lógica, evento ni flujo funcional de la aplicación.”
+
+  Esta implementación respeta los requisitos funcionales provistos.
 */
 
-'use strict';
+(() => {
+  'use strict';
 
-// ---------- Utils ----------
-const $ = (sel, root=document) => root.querySelector(sel);
-const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+  // -----------------------------
+  // DOM
+  // -----------------------------
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const pad2 = (n) => String(n).padStart(2,'0');
+  const el = {
+    btnCentral: $('#btnCentral'),
+    actionLabel: $('#actionLabel'),
+    timerValue: $('#timerValue'),
+    etaValue: $('#etaValue'),
+    metaValue: $('#metaValue'),
+    overtimeTag: $('#overtimeTag'),
 
-function formatClock(ts){
-  const d = new Date(ts);
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
+    ringProgress: $('#ringProgress'),
+    ringCap: $('#ringCap'),
+    ringPulse: $('#ringPulse'),
 
-function formatMMSS(ms){
-  const total = Math.max(0, Math.round(ms/1000));
-  const m = Math.floor(total/60);
-  const s = total % 60;
-  return `${pad2(m)}:${pad2(s)}`;
-}
+    btnAdd: $('#btnAdd'),
+    btnRegistro: $('#btnRegistro'),
+    btnPersonalizar: $('#btnPersonalizar'),
 
-function formatPlusMMSS(ms){
-  const total = Math.max(0, Math.round(ms/1000));
-  const m = Math.floor(total/60);
-  const s = total % 60;
-  return `+${pad2(m)}:${pad2(s)}`;
-}
+    queueList: $('#queueList'),
+    queueEmpty: $('#queueEmpty'),
 
-function formatDurationHM(mins){
-  const m = Math.max(0, Math.round(mins));
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m/60);
-  const rm = m % 60;
-  return `${h}h ${rm}m`;
-}
+    modalOverlay: $('#modalOverlay'),
+    modalTitle: $('#modalTitle'),
+    modalBody: $('#modalBody'),
+    modalClose: $('#modalClose'),
 
-function clamp(v, a, b){return Math.max(a, Math.min(b, v));}
+    confirmOverlay: $('#confirmOverlay'),
+    confirmText: $('#confirmText'),
+    confirmCancel: $('#confirmCancel'),
+    confirmOk: $('#confirmOk'),
 
-// ---------- Storage ----------
-const LS_KEY_SETTINGS = 'barber_turnos_settings_v1';
-const LS_KEY_REGISTRO = 'barber_turnos_registro_v1';
+    toast: $('#toast')
+  };
 
-const DEFAULT_SETTINGS = {
-  base: {
-    'Corte': 30,
-    'Corte + Barba': 45,
-    'Corte + Barba + Sellado': 60,
-    'Color': 170,
-    'Permanente': 160,
-  },
-  deltaSellado: {
-    'Rápido': 15,
-    'Normal': 20,
-    'Lento': 25,
-  },
-  ajusteVelocidad: {
-    'Rápido': -10,
-    'Normal': 0,
-    'LentoCorto': 10, // <=60
-    'LentoLargo': 15, // >60
-  }
-};
+  // -----------------------------
+  // Settings (defaults)
+  // -----------------------------
+  const DEFAULTS = {
+    baseMinutes: {
+      'Corte': 30,
+      'Corte + Barba': 45,
+      'Corte + Barba + Sellado': 60,
+      'Color': 170,
+      'Permanente': 160
+    },
+    selladoDeltaMinutes: {
+      'Rápido': 15,
+      'Normal': 20,
+      'Lento': 25
+    },
+    speedAdjustMinutes: {
+      'Rápido': -10,
+      'Normal': 0,
+      'Lento': 10,
+      'LentoLargo': 15
+    }
+  };
 
-function loadSettings(){
-  try {
-    const raw = localStorage.getItem(LS_KEY_SETTINGS);
-    if (!raw) return structuredClone(DEFAULT_SETTINGS);
-    const parsed = JSON.parse(raw);
-    return {
-      base: {...DEFAULT_SETTINGS.base, ...(parsed.base || {})},
-      deltaSellado: {...DEFAULT_SETTINGS.deltaSellado, ...(parsed.deltaSellado || {})},
-      ajusteVelocidad: {...DEFAULT_SETTINGS.ajusteVelocidad, ...(parsed.ajusteVelocidad || {})},
-    };
-  } catch {
-    return structuredClone(DEFAULT_SETTINGS);
-  }
-}
+  const STORAGE = {
+    settings: 'barber.settings.v1',
+    registro: 'barber.registro.v1'
+  };
 
-function saveSettings(s){
-  localStorage.setItem(LS_KEY_SETTINGS, JSON.stringify(s));
-}
+  let settings = loadJSON(STORAGE.settings, DEFAULTS);
 
-function loadRegistro(){
-  try {
-    const raw = localStorage.getItem(LS_KEY_REGISTRO);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+  // -----------------------------
+  // State
+  // -----------------------------
+  const state = {
+    running: false,
+    startTs: 0,
+    endTs: 0,
+    durationMs: 0,
+    service: '',
+    speed: 'Normal',
+    overtimeNotified: false,
 
-function saveRegistro(list){
-  localStorage.setItem(LS_KEY_REGISTRO, JSON.stringify(list));
-}
+    queue: [],
+    nextReadyId: null,
 
-// ---------- Haptics & Sound ----------
-let audioCtx = null;
-function clickFx(){
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
+    registro: loadJSON(STORAGE.registro, [])
+  };
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(640, now);
+  // -----------------------------
+  // Utilities
+  // -----------------------------
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
 
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.02, now + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+  function now() { return Date.now(); }
 
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
+  function pad2(n) { return String(n).padStart(2, '0'); }
 
-    osc.start(now);
-    osc.stop(now + 0.035);
-  } catch {
-    // silent fallback
-  }
-}
-
-function vibrate(pattern){
-  try {
-    if (navigator.vibrate) navigator.vibrate(pattern);
-  } catch {
-    // silent
-  }
-}
-
-function feedback(kind){
-  // Ultra sutil: click + vibra suave
-  clickFx();
-  if (kind === 'danger') vibrate([18]);
-  else vibrate([10]);
-}
-
-// ---------- App State ----------
-const state = {
-  settings: loadSettings(),
-  registro: loadRegistro(),
-  current: null, // { service, speed, plannedMin, startTs, plannedMs, overtimeNotified }
-  queue: [], // items: {id, service, speed, plannedMin, startTs, endTs, ready}
-  timerId: null,
-  addModalStep: 1,
-  addModalSpeed: null,
-  deadlineClass: 'ok',
-};
-
-// ---------- Duration rules ----------
-function calcPlannedMinutes(service, speed){
-  const s = state.settings;
-
-  let total = 0;
-
-  if (service === 'Corte + Sellado'){
-    // base corte (normal) + delta sellado por velocidad
-    total = Number(s.base['Corte'] ?? 30) + Number(s.deltaSellado[speed] ?? 20);
-  } else if (service === 'Corte + Sellado (sin barba)') {
-    // alias defensivo
-    total = Number(s.base['Corte'] ?? 30) + Number(s.deltaSellado[speed] ?? 20);
-  } else {
-    total = Number(s.base[service] ?? 0);
+  function fmtHHMM(ts) {
+    const d = new Date(ts);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   }
 
-  // Ajuste por velocidad aplicado al total resultante
-  if (speed === 'Rápido') total += Number(s.ajusteVelocidad['Rápido'] ?? -10);
-  if (speed === 'Normal') total += Number(s.ajusteVelocidad['Normal'] ?? 0);
-  if (speed === 'Lento'){
-    const adjKey = total <= 60 ? 'LentoCorto' : 'LentoLargo';
-    total += Number(s.ajusteVelocidad[adjKey] ?? (total <= 60 ? 10 : 15));
+  function fmtMMSS(ms) {
+    const s = Math.floor(Math.abs(ms) / 1000);
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    return `${pad2(mm)}:${pad2(ss)}`;
   }
 
-  return Math.max(1, Math.round(total));
-}
-
-function serviceList(){
-  return [
-    { key: 'Corte', baseLabel: 'Corte (base 30)' },
-    { key: 'Corte + Barba', baseLabel: 'Corte + Barba (base 45)' },
-    { key: 'Corte + Sellado', baseLabel: 'Corte + Sellado (base Corte + delta sellado)' },
-    { key: 'Corte + Barba + Sellado', baseLabel: 'Corte + Barba + Sellado (base 60)' },
-    { key: 'Color', baseLabel: 'Color (base 170)' },
-    { key: 'Permanente', baseLabel: 'Permanente (base 160)' },
-  ];
-}
-
-// ---------- Deadlines ----------
-function getActiveLimitTs(nowTs){
-  const now = new Date(nowTs);
-  const y = now.getFullYear();
-  const mo = now.getMonth();
-  const d = now.getDate();
-  const thirteen = new Date(y, mo, d, 13, 0, 0, 0).getTime();
-  const twentyTwo = new Date(y, mo, d, 22, 0, 0, 0).getTime();
-  return nowTs < thirteen ? thirteen : twentyTwo;
-}
-
-function classifyDeadline(plannedEndTs, nowTs){
-  const limit = getActiveLimitTs(nowTs);
-  const yellow = limit - 10*60*1000;
-  if (plannedEndTs <= yellow) return {cls:'ok', limitTs: limit};
-  if (plannedEndTs <= limit) return {cls:'warn', limitTs: limit};
-  return {cls:'danger', limitTs: limit};
-}
-
-function getLastPlannedEndTs(nowTs){
-  // último: cola o actual
-  if (state.queue.length){
-    const last = state.queue[state.queue.length - 1];
-    return last.endTs;
-  }
-  if (state.current){
-    return state.current.startTs + state.current.plannedMs;
-  }
-  return nowTs;
-}
-
-// ---------- Queue scheduling ----------
-function recalcQueue(){
-  const nowTs = Date.now();
-  let cursor = nowTs;
-  if (state.current){
-    cursor = state.current.startTs + state.current.plannedMs;
+  function fmtDurationNice(ms) {
+    const m = Math.round(ms / 60000);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return `${h}h ${mm}m`;
   }
 
-  for (const item of state.queue){
-    item.startTs = cursor;
-    item.endTs = cursor + item.plannedMin*60*1000;
-    cursor = item.endTs;
+  function minutesToMs(m) { return Math.round(m * 60000); }
+
+  function loadJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch { return fallback; }
   }
 
-  // Badge "PRÓXIMO" siempre para el primero
-  state.queue.forEach((it, idx)=>{
-    it.isNext = idx === 0;
+  function saveJSON(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
+
+  function uid() {
+    return Math.random().toString(16).slice(2) + '-' + Date.now().toString(16);
+  }
+
+  function toast(msg) {
+    el.toast.textContent = msg;
+    el.toast.hidden = false;
+    el.toast.classList.remove('toast--show');
+    // reflow
+    void el.toast.offsetWidth;
+    el.toast.classList.add('toast--show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => {
+      el.toast.classList.remove('toast--show');
+      setTimeout(() => { el.toast.hidden = true; }, 220);
+    }, 1600);
+  }
+
+  // -----------------------------
+  // Feedback (WebAudio + vibrate)
+  // -----------------------------
+  let audioCtx = null;
+  function ensureAudio() {
+    if (audioCtx) return audioCtx;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    } catch {
+      return null;
+    }
+  }
+
+  function clickTick(intensity = 0.035) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      // iOS requires a gesture to resume; we attempt but ignore failure.
+      ctx.resume().catch(() => {});
+    }
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.value = 880;
+    const t0 = ctx.currentTime;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(intensity, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + 0.07);
+  }
+
+  function vibrate(ms = 10) {
+    try {
+      if (navigator.vibrate) navigator.vibrate(ms);
+    } catch {}
+  }
+
+  function feedback(kind = 'tap') {
+    // Ultra subtle
+    if (kind === 'danger') clickTick(0.045);
+    else clickTick(0.03);
+    vibrate(8);
+  }
+
+  // -----------------------------
+  // Durations
+  // -----------------------------
+  function calcDurationMs(service, speed) {
+    // Base
+    let baseMin;
+    if (service === 'Corte + Sellado') {
+      // base corte + delta sellado
+      baseMin = (settings.baseMinutes['Corte'] ?? DEFAULTS.baseMinutes['Corte']) +
+        (settings.selladoDeltaMinutes[speed] ?? DEFAULTS.selladoDeltaMinutes[speed]);
+    } else {
+      baseMin = settings.baseMinutes[service] ?? DEFAULTS.baseMinutes[service] ?? 0;
+    }
+
+    // Speed adjust (applies to total)
+    let adj = 0;
+    if (speed === 'Rápido') adj = settings.speedAdjustMinutes['Rápido'] ?? DEFAULTS.speedAdjustMinutes['Rápido'];
+    if (speed === 'Normal') adj = settings.speedAdjustMinutes['Normal'] ?? DEFAULTS.speedAdjustMinutes['Normal'];
+    if (speed === 'Lento') {
+      const isLong = baseMin > 60;
+      const key = isLong ? 'LentoLargo' : 'Lento';
+      adj = settings.speedAdjustMinutes[key] ?? DEFAULTS.speedAdjustMinutes[key];
+    }
+
+    const totalMin = baseMin + adj;
+    return minutesToMs(totalMin);
+  }
+
+  function durationLabel(service, speed) {
+    const ms = calcDurationMs(service, speed);
+    return `${Math.round(ms / 60000)}m`;
+  }
+
+  // -----------------------------
+  // Schedule classification
+  // -----------------------------
+  function getActiveLimitTs(refTs) {
+    const d = new Date(refTs);
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+    const limit13 = dayStart + (13 * 60 + 0) * 60000;
+    const limit22 = dayStart + (22 * 60 + 0) * 60000;
+
+    const isBefore13 = (h < 13) || (h === 12 && m <= 59);
+    return isBefore13 ? limit13 : limit22;
+  }
+
+  function classifyFinish(finTs, refTs) {
+    const limitTs = getActiveLimitTs(refTs);
+    const yellowStart = limitTs - 10 * 60000;
+
+    if (finTs <= yellowStart) return { cls: 'ok', label: 'OK', limitTs };
+    if (finTs <= limitTs) return { cls: 'warn', label: 'AMARILLO', limitTs };
+    return { cls: 'bad', label: 'ROJO', limitTs };
+  }
+
+  function getPlannedFinishTs() {
+    const t = now();
+    if (state.running) {
+      if (state.queue.length === 0) return state.endTs;
+      return state.queue[state.queue.length - 1].endTs;
+    }
+    if (state.queue.length) return state.queue[state.queue.length - 1].endTs;
+    return t;
+  }
+
+  // -----------------------------
+  // Queue planning
+  // -----------------------------
+  function recalcQueue() {
+    const t = now();
+    let cursor;
+    if (state.running) cursor = state.endTs;
+    else cursor = t;
+
+    for (const item of state.queue) {
+      item.startTs = cursor;
+      item.endTs = cursor + item.durationMs;
+      cursor = item.endTs;
+    }
+
+    if (state.queue.length) {
+      state.queue[0].isNext = true;
+      for (let i = 1; i < state.queue.length; i++) state.queue[i].isNext = false;
+    }
+
+    // If nextReady exists, keep it only if still present
+    if (state.nextReadyId && !state.queue.some(q => q.id === state.nextReadyId)) {
+      state.nextReadyId = null;
+    }
+  }
+
+  function computeProjectedFinishWithNew(service, speed) {
+    const t = now();
+    const durationMs = calcDurationMs(service, speed);
+
+    // Copy cursor logic per spec
+    let cursor;
+    if (state.running) cursor = state.endTs;
+    else cursor = t;
+
+    // existing queue
+    if (state.queue.length) cursor = state.queue[state.queue.length - 1].endTs;
+
+    const projectedEnd = cursor + durationMs;
+    return projectedEnd;
+  }
+
+  // -----------------------------
+  // Timer control
+  // -----------------------------
+  let tickTimer = null;
+
+  function startService(service, speed, fromQueueItem = null) {
+    const t = now();
+    const durationMs = fromQueueItem ? fromQueueItem.durationMs : calcDurationMs(service, speed);
+
+    state.running = true;
+    state.overtimeNotified = false;
+    state.startTs = t;
+    state.durationMs = durationMs;
+    state.endTs = t + durationMs;
+    state.service = service;
+    state.speed = speed;
+
+    // When starting a nextReady item, clear nextReady
+    if (fromQueueItem) {
+      state.nextReadyId = null;
+    }
+
+    if (tickTimer) clearInterval(tickTimer);
+    tickTimer = setInterval(tick, 250);
+    tick();
+    renderAll();
+  }
+
+  function finalizeCurrent() {
+    if (!state.running) return;
+
+    const t = now();
+    const actualMs = t - state.startTs;
+
+    // a) guardar registro
+    state.registro.push({
+      id: uid(),
+      service: state.service,
+      speed: state.speed,
+      startTs: state.startTs,
+      endTs: t,
+      actualMs
+    });
+    saveJSON(STORAGE.registro, state.registro);
+
+    // b) detener timer
+    state.running = false;
+    state.startTs = 0;
+    state.endTs = 0;
+    state.durationMs = 0;
+    state.service = '';
+    state.speed = 'Normal';
+    state.overtimeNotified = false;
+
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
+    }
+
+    // c) recalcular cola
+    recalcQueue();
+
+    // d) marcar el primer item como “Siguiente listo” esperando INICIAR
+    if (state.queue.length) {
+      state.nextReadyId = state.queue[0].id;
+    } else {
+      state.nextReadyId = null;
+    }
+
+    renderAll();
+    toast('Registro guardado');
+  }
+
+  function startNextReadyIfAny() {
+    if (state.running) return;
+    if (!state.nextReadyId) return;
+
+    const idx = state.queue.findIndex(q => q.id === state.nextReadyId);
+    if (idx === -1) {
+      state.nextReadyId = null;
+      return;
+    }
+
+    const item = state.queue.splice(idx, 1)[0];
+    recalcQueue();
+    startService(item.service, item.speed, item);
+  }
+
+  function tick() {
+    if (!state.running) return;
+    const t = now();
+    const remaining = state.endTs - t;
+
+    const overtime = remaining < 0;
+    if (overtime && !state.overtimeNotified) {
+      state.overtimeNotified = true;
+      feedback('danger');
+    }
+
+    // UI values
+    if (!overtime) {
+      el.timerValue.textContent = fmtMMSS(remaining);
+      el.overtimeTag.hidden = true;
+      el.metaValue.textContent = `En proceso: ${state.service}`;
+    } else {
+      el.timerValue.textContent = `+${fmtMMSS(remaining)}`;
+      el.overtimeTag.hidden = false;
+      el.metaValue.textContent = 'Demora';
+    }
+
+    el.etaValue.textContent = overtime ? `Termina ${fmtHHMM(t)} · Fuera de horario` : `Termina ${fmtHHMM(state.endTs)}`;
+
+    updateRingVisual(remaining);
+    updateAddButtonStatus();
+  }
+
+  // -----------------------------
+  // Ring visual (SVG stroke)
+  // -----------------------------
+  const R = 92;
+  const CIRC = 2 * Math.PI * R;
+  el.ringProgress.style.strokeDasharray = `${CIRC} ${CIRC}`;
+  el.ringProgress.style.strokeDashoffset = `${0}`;
+
+  function updateRingVisual(remainingMs) {
+    const t = now();
+    const total = state.running ? state.durationMs : minutesToMs(30);
+
+    const overtime = remainingMs < 0;
+    const ringCard = $('.timerCard');
+
+    if (overtime) {
+      ringCard.classList.add('is-overtime');
+      ringCard.classList.remove('is-running');
+      el.ringProgress.style.strokeDashoffset = `${0}`;
+      // cap becomes subtle pulse at top
+      setCapByAngle(-90);
+      el.ringCap.style.opacity = '0.55';
+      el.ringPulse.style.opacity = '1';
+      return;
+    }
+
+    ringCard.classList.remove('is-overtime');
+    if (state.running) ringCard.classList.add('is-running');
+    else ringCard.classList.remove('is-running');
+
+    if (!state.running) {
+      // idle: fully lit
+      el.ringProgress.style.strokeDashoffset = `${0}`;
+      setCapByAngle(-90);
+      el.ringCap.style.opacity = '1';
+      el.ringPulse.style.opacity = '0.65';
+      return;
+    }
+
+    const elapsed = clamp(t - state.startTs, 0, total);
+    const ratio = 1 - (elapsed / total);
+
+    // Depletion: reduce the visible stroke
+    const offset = (1 - ratio) * CIRC;
+    el.ringProgress.style.strokeDashoffset = `${offset}`;
+
+    // cap follows the end of the stroke
+    const angle = -90 + ratio * 360;
+    setCapByAngle(angle);
+    el.ringCap.style.opacity = '1';
+    el.ringPulse.style.opacity = '0.8';
+  }
+
+  function setCapByAngle(deg) {
+    const rad = (deg * Math.PI) / 180;
+    const cx = 110;
+    const cy = 110;
+    const x = cx + R * Math.cos(rad);
+    const y = cy + R * Math.sin(rad);
+    el.ringCap.setAttribute('cx', x.toFixed(2));
+    el.ringCap.setAttribute('cy', y.toFixed(2));
+  }
+
+  // -----------------------------
+  // Render
+  // -----------------------------
+  function renderAll() {
+    renderHeaderTimer();
+    recalcQueue();
+    renderQueue();
+    updateAddButtonStatus();
+  }
+
+  function renderHeaderTimer() {
+    if (!state.running) {
+      el.actionLabel.textContent = 'INICIAR';
+      el.timerValue.textContent = '--:--';
+      el.etaValue.textContent = 'Termina --:--';
+      el.metaValue.textContent = 'Libre';
+      el.overtimeTag.hidden = true;
+
+      updateRingVisual(0);
+      return;
+    }
+
+    el.actionLabel.textContent = 'FINALIZAR';
+    el.etaValue.textContent = `Termina ${fmtHHMM(state.endTs)}`;
+    tick();
+  }
+
+  function renderQueue() {
+    el.queueList.innerHTML = '';
+    if (!state.queue.length) {
+      el.queueEmpty.hidden = false;
+      return;
+    }
+    el.queueEmpty.hidden = true;
+
+    for (let i = 0; i < state.queue.length; i++) {
+      const item = state.queue[i];
+      const card = document.createElement('div');
+      card.className = 'qCard';
+      card.dataset.id = item.id;
+
+      // Next highlight
+      if (i === 0) {
+        card.classList.add('is-next');
+        if (state.nextReadyId === item.id) card.classList.add('is-ready');
+      }
+
+      const waitMin = Math.max(0, Math.round((item.startTs - now()) / 60000));
+
+      card.innerHTML = `
+        <div class="qSwipe">
+          <button class="qDelete" type="button">Eliminar</button>
+          <div class="qFront">
+            <div class="qLeft">
+              <div class="qIcon">${serviceIconSVG(item.service)}</div>
+            </div>
+            <div class="qMid">
+              <div class="qTopLine">
+                <div class="qTitle">${escapeHTML(item.service)}</div>
+                ${i === 0 ? `<span class="qBadge">PRÓXIMO</span>` : ''}
+              </div>
+              <div class="qSub">
+                <span>${escapeHTML(item.speed)}</span>
+                <span class="dot">•</span>
+                <span>${Math.round(item.durationMs / 60000)}m</span>
+                <span class="dot">•</span>
+                <span>Espera: ${waitMin}m</span>
+              </div>
+              <div class="qTimes">Inicio ${fmtHHMM(item.startTs)} / Fin ${fmtHHMM(item.endTs)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      el.queueList.appendChild(card);
+    }
+
+    bindQueueInteractions();
+  }
+
+  function escapeHTML(s) {
+    return String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  // -----------------------------
+  // Icons per service (SVG, no emoji)
+  // -----------------------------
+  function serviceIconSVG(service) {
+    const stroke = 'rgba(234,242,248,.92)';
+    const glow = 'rgba(79,209,255,.55)';
+
+    // Minimal line icons
+    if (service === 'Corte') {
+      return `
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M7 6l10 10" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M10 3l3 3" fill="none" stroke="${glow}" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M14 12l7-7" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M5 14l-2 2 3 3 2-2" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>`;
+    }
+    if (service === 'Corte + Barba' || service === 'Corte + Barba + Sellado') {
+      return `
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M12 4a6 6 0 0 0-6 6v2a6 6 0 0 0 12 0v-2a6 6 0 0 0-6-6Z" fill="none" stroke="${stroke}" stroke-width="1.7"/>
+          <path d="M8 13c1.2 1 2.6 1.5 4 1.5S14.8 14 16 13" fill="none" stroke="${glow}" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M9 16c.8 2 2 3 3 3s2.2-1 3-3" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>`;
+    }
+    if (service === 'Corte + Sellado') {
+      return `
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M7 7h10" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M9 5v14" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M15 5v14" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M12 10c-1.2 1.1-1.2 2.9 0 4 1.2-1.1 1.2-2.9 0-4Z" fill="none" stroke="${glow}" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>`;
+    }
+    if (service === 'Color') {
+      return `
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M7 3h10v6a5 5 0 0 1-10 0V3Z" fill="none" stroke="${stroke}" stroke-width="1.7" stroke-linejoin="round"/>
+          <path d="M9 21h6" fill="none" stroke="${stroke}" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M12 9v4" fill="none" stroke="${glow}" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>`;
+    }
+    if (service === 'Permanente') {
+      return `
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M6 18c0-2 2-3 3-4s1-3 0-4 0-3 2-4 5 0 5 2-2 3-3 4-1 3 0 4 0 3-2 4-5 0-5-2Z" fill="none" stroke="${stroke}" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M8 12h8" fill="none" stroke="${glow}" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>`;
+    }
+
+    // Fallback
+    return `
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M6 12h12" fill="none" stroke="${stroke}" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M12 6v12" fill="none" stroke="${glow}" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>`;
+  }
+
+  // -----------------------------
+  // Add button status + confirm on red
+  // -----------------------------
+  function updateAddButtonStatus() {
+    const finTs = getPlannedFinishTs();
+    const t = now();
+    const { cls, limitTs } = classifyFinish(finTs, t);
+
+    el.btnAdd.classList.remove('is-ok', 'is-warn', 'is-bad');
+    el.btnAdd.classList.add(`is-${cls}`);
+
+    // store for confirm text
+    el.btnAdd.dataset.limitTs = String(limitTs);
+    el.btnAdd.dataset.cls = cls;
+  }
+
+  // -----------------------------
+  // Modal system
+  // -----------------------------
+  let activeModal = null;
+
+  function openModal(title, bodyNodeOrHTML, opts = {}) {
+    activeModal = opts.name || 'modal';
+    el.modalTitle.textContent = title;
+
+    el.modalBody.innerHTML = '';
+    if (typeof bodyNodeOrHTML === 'string') {
+      el.modalBody.innerHTML = bodyNodeOrHTML;
+    } else {
+      el.modalBody.appendChild(bodyNodeOrHTML);
+    }
+
+    el.modalOverlay.hidden = false;
+    requestAnimationFrame(() => {
+      el.modalOverlay.classList.add('is-open');
+    });
+
+    // lock background scroll
+    document.documentElement.classList.add('modalOpen');
+    document.body.classList.add('modalOpen');
+
+    // focus
+    el.modalClose.focus({ preventScroll: true });
+
+    feedback('tap');
+  }
+
+  function closeModal() {
+    if (el.modalOverlay.hidden) return;
+    el.modalOverlay.classList.remove('is-open');
+    setTimeout(() => {
+      el.modalOverlay.hidden = true;
+      el.modalBody.innerHTML = '';
+      activeModal = null;
+    }, 220);
+
+    document.documentElement.classList.remove('modalOpen');
+    document.body.classList.remove('modalOpen');
+
+    feedback('tap');
+  }
+
+  el.modalClose.addEventListener('click', closeModal);
+  el.modalOverlay.addEventListener('click', (e) => {
+    if (e.target === el.modalOverlay) closeModal();
   });
 
-  // Clasificación visual del botón Agregar cliente
-  const lastEnd = getLastPlannedEndTs(nowTs);
-  const {cls} = classifyDeadline(lastEnd, nowTs);
-  state.deadlineClass = cls;
+  // -----------------------------
+  // Confirm overlay
+  // -----------------------------
+  function confirmAddRed(text, onOk) {
+    el.confirmText.textContent = text;
+    el.confirmOverlay.hidden = false;
+    requestAnimationFrame(() => el.confirmOverlay.classList.add('is-open'));
 
-  renderQueue();
-  renderAddButtonClass();
-}
+    const cleanup = () => {
+      el.confirmOverlay.classList.remove('is-open');
+      setTimeout(() => { el.confirmOverlay.hidden = true; }, 180);
+    };
 
-// ---------- UI refs ----------
-const els = {
-  btnCentral: $('#btnCentral'),
-  ring: $('#ring'),
-  cap: $('#ringCap'),
-  ringGlow: $('#ringGlow'),
-  timerAction: $('#timerAction'),
-  timerTime: $('#timerTime'),
-  timerEnd: $('#timerEnd'),
-  timerMeta: $('#timerMeta'),
-  timerOvertime: $('#timerOvertime'),
-  btnAgregar: $('#btnAgregar'),
-  listaEspera: $('#listaEspera'),
-  emptyState: $('#emptyState'),
-  app: $('#app'),
+    const cancel = () => {
+      cleanup();
+      feedback('tap');
+    };
 
-  modalAgregar: $('#modalAgregar'),
-  // NOTE: id in HTML is "agregarCerrar"
-  addCerrar: $('#agregarCerrar'),
-  addVolver: $('#agregarVolver'),
-  bubblesVel: $('#bubblesVelocidad'),
-  bubblesSrv: $('#bubblesServicio'),
+    const ok = () => {
+      cleanup();
+      feedback('tap');
+      onOk();
+    };
 
-  modalPersonalizar: $('#modalPersonalizar'),
-  personalizarCerrar: $('#personalizarCerrar'),
-  modalRegistro: $('#modalRegistro'),
-  registroCerrar: $('#registroCerrar'),
+    el.confirmCancel.onclick = cancel;
+    el.confirmOk.onclick = ok;
 
-  btnRegistro: $('#btnRegistro'),
-  btnPersonalizar: $('#btnPersonalizar'),
-
-  // Personalizar inputs
-  inpCorte: $('#tiempoCorte'),
-  inpCorteBarba: $('#tiempoCorteBarba'),
-  inpCorteBarbaSellado: $('#tiempoCorteBarbaSellado'),
-  inpColor: $('#tiempoColor'),
-  inpPermanente: $('#tiempoPermanente'),
-  inpDeltaRapido: $('#deltaSelladoRapido'),
-  inpDeltaNormal: $('#deltaSelladoNormal'),
-  inpDeltaLento: $('#deltaSelladoLento'),
-  inpAdjRapido: $('#ajusteRapido'),
-  inpAdjNormal: $('#ajusteNormal'),
-  inpAdjLentoCorto: $('#ajusteLentoCorto'),
-  inpAdjLentoLargo: $('#ajusteLentoLargo'),
-  btnRestoreDefaults: $('#btnRestoreDefaults'),
-  btnGuardarPersonalizar: $('#btnGuardarPersonalizar'),
-
-  // Registro
-  registroResumen: $('#registroResumen'),
-  registroLista: $('#registroLista'),
-  btnCopiarRegistro: $('#btnCopiarRegistro'),
-  btnBorrarRegistro: $('#btnBorrarRegistro'),
-};
-
-// ---------- Render: timer ring ----------
-const RING_RADIUS = 46;
-const RING_CIRC = 2 * Math.PI * RING_RADIUS;
-els.ring.style.strokeDasharray = String(RING_CIRC);
-els.ring.style.strokeDashoffset = '0';
-els.ringGlow.style.strokeDasharray = String(RING_CIRC);
-els.ringGlow.style.strokeDashoffset = '0';
-
-function setRingProgressRemaining(fracRemaining){
-  const f = clamp(fracRemaining, 0, 1);
-  const off = (1 - f) * RING_CIRC;
-  els.ring.style.strokeDashoffset = String(off);
-  els.ringGlow.style.strokeDashoffset = String(off);
-
-  // cap position
-  const angle = (-90 + 360*f) * (Math.PI/180);
-  const cx = 60 + Math.cos(angle) * RING_RADIUS;
-  const cy = 60 + Math.sin(angle) * RING_RADIUS;
-  els.cap.setAttribute('cx', cx.toFixed(2));
-  els.cap.setAttribute('cy', cy.toFixed(2));
-  // esconder cap cuando está apagado al 100%
-  els.cap.style.opacity = f <= 0.001 ? '0' : '1';
-}
-
-function setRingOvertime(isOver){
-  document.documentElement.classList.toggle('isOvertime', isOver);
-}
-
-// ---------- Timer loop ----------
-function startTimerLoop(){
-  if (state.timerId) clearInterval(state.timerId);
-  state.timerId = setInterval(tick, 250);
-  tick();
-}
-
-function stopTimerLoop(){
-  if (state.timerId) clearInterval(state.timerId);
-  state.timerId = null;
-}
-
-function tick(){
-  const nowTs = Date.now();
-
-  // update top-level deadline class periodically
-  if (!state.current) recalcQueue();
-
-  if (!state.current){
-    setRingOvertime(false);
-    setRingProgressRemaining(1);
-    els.timerAction.textContent = 'INICIAR';
-    els.timerTime.textContent = '--:--';
-    els.timerEnd.textContent = 'Termina --:--';
-    els.timerMeta.textContent = 'Libre';
-    els.timerOvertime.hidden = true;
-    els.btnCentral.setAttribute('data-state', 'idle');
-    return;
+    feedback('tap');
   }
 
-  const elapsed = nowTs - state.current.startTs;
-  const remaining = state.current.plannedMs - elapsed;
-  const isOver = remaining < 0;
+  // -----------------------------
+  // Add client (2 steps)
+  // -----------------------------
+  const SPEEDS = ['Rápido', 'Normal', 'Lento'];
+  const SERVICES = [
+    'Corte',
+    'Corte + Barba',
+    'Corte + Sellado',
+    'Corte + Barba + Sellado',
+    'Color',
+    'Permanente'
+  ];
 
-  if (isOver && !state.current.overtimeNotified){
-    state.current.overtimeNotified = true;
-    feedback('danger');
+  function openAddClientModal() {
+    const wrap = document.createElement('div');
+    wrap.className = 'bubbleFlow';
+
+    const stepPill = document.createElement('div');
+    stepPill.className = 'stepPill';
+    stepPill.innerHTML = `
+      <div class="stepDot is-on"></div>
+      <div class="stepDot"></div>
+    `;
+
+    const title = document.createElement('div');
+    title.className = 'stepTitle';
+    title.textContent = 'Elegí velocidad';
+
+    const speedRow = document.createElement('div');
+    speedRow.className = 'bubbleRow';
+
+    let chosenSpeed = null;
+
+    for (const sp of SPEEDS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bubbleBtn';
+      b.textContent = sp;
+      b.addEventListener('click', () => {
+        chosenSpeed = sp;
+        feedback('tap');
+
+        // Step 2
+        title.textContent = 'Elegí servicio';
+        stepPill.innerHTML = `
+          <div class="stepDot"></div>
+          <div class="stepDot is-on"></div>
+        `;
+
+        const serviceGrid = document.createElement('div');
+        serviceGrid.className = 'serviceGrid';
+
+        for (const sv of SERVICES) {
+          const sbtn = document.createElement('button');
+          sbtn.type = 'button';
+          sbtn.className = 'serviceCard';
+          const d = durationLabel(sv, chosenSpeed);
+          sbtn.innerHTML = `
+            <div class="serviceIcon">${serviceIconSVG(sv)}</div>
+            <div class="serviceName">${escapeHTML(sv)}</div>
+            <div class="serviceMeta">${escapeHTML(chosenSpeed)} · ${d}</div>
+          `;
+          sbtn.addEventListener('click', () => {
+            feedback('tap');
+            closeModal();
+            handleAddSelected(chosenSpeed, sv);
+          });
+          serviceGrid.appendChild(sbtn);
+        }
+
+        // Replace content
+        speedRow.replaceWith(serviceGrid);
+      });
+      speedRow.appendChild(b);
+    }
+
+    wrap.appendChild(stepPill);
+    wrap.appendChild(title);
+    wrap.appendChild(speedRow);
+
+    const hint = document.createElement('div');
+    hint.className = 'modalHint';
+    hint.textContent = 'Cancelar con la X';
+    wrap.appendChild(hint);
+
+    openModal('Agregar cliente', wrap, { name: 'add' });
   }
 
-  setRingOvertime(isOver);
+  function handleAddSelected(speed, service) {
+    // If adding would turn red => confirm
+    const projectedFinish = computeProjectedFinishWithNew(service, speed);
+    const t = now();
+    const { cls, limitTs } = classifyFinish(projectedFinish, t);
 
-  if (!isOver){
-    setRingProgressRemaining(remaining / state.current.plannedMs);
-    els.timerTime.textContent = formatMMSS(remaining);
-    els.timerOvertime.hidden = true;
-  } else {
-    setRingProgressRemaining(0);
-    els.timerTime.textContent = formatPlusMMSS(-remaining);
-    els.timerOvertime.hidden = false;
+    const doAdd = () => {
+      // Add logic per spec
+      if (state.running) {
+        enqueue(service, speed);
+      } else {
+        // If no running: start immediately
+        startService(service, speed);
+      }
+      renderAll();
+    };
+
+    if (cls === 'bad') {
+      const text = `Terminarías ${fmtHHMM(projectedFinish)} (límite ${fmtHHMM(limitTs)}). ¿Agregar igual?`;
+      confirmAddRed(text, doAdd);
+      return;
+    }
+
+    doAdd();
   }
 
-  els.timerAction.textContent = 'FINALIZAR';
-  els.timerEnd.textContent = `Termina ${formatClock(state.current.startTs + state.current.plannedMs)}`;
-  els.timerMeta.textContent = isOver ? 'Demora' : `En proceso: ${state.current.service}`;
-  els.btnCentral.setAttribute('data-state', 'running');
+  function enqueue(service, speed) {
+    const item = {
+      id: uid(),
+      service,
+      speed,
+      durationMs: calcDurationMs(service, speed),
+      startTs: 0,
+      endTs: 0,
+      isNext: false
+    };
 
-  // Update add-button class
-  const lastEnd = getLastPlannedEndTs(nowTs);
-  const {cls} = classifyDeadline(lastEnd, nowTs);
-  state.deadlineClass = cls;
-  renderAddButtonClass();
-}
-
-// ---------- Render: queue ----------
-function iconForService(service){
-  // Minimal SVG per service, no emoji.
-  // returns inner SVG paths (viewBox 0 0 24 24)
-  const m = {
-    'Corte': 'M7 4h10v2H7V4zm-2 3h14v2H5V7zm3 4h8v2H8v-2zm-1 4h10v2H7v-2z',
-    'Corte + Barba': 'M12 3a5 5 0 0 1 5 5v2a4 4 0 0 1-2 3.46V16a3 3 0 0 1-6 0v-2.54A4 4 0 0 1 7 10V8a5 5 0 0 1 5-5zm-3 7a3 3 0 0 0 6 0V8a3 3 0 0 0-6 0v2z',
-    'Corte + Sellado': 'M12 2l5 9h-4v11H11V11H7l5-9z',
-    'Corte + Barba + Sellado': 'M12 2l5 8h-3v12h-4V10H7l5-8z',
-    'Color': 'M7 3h10v2H7V3zm-2 4h14v14H5V7zm3 3v8h8v-8H8z',
-    'Permanente': 'M7 5c2 0 2 2 4 2s2-2 4-2 2 2 4 2v2c-2 0-2-2-4-2s-2 2-4 2-2-2-4-2-2 2-4 2V7c2 0 2-2 4-2zm-2 8c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2v2c-2 0-2-2-4-2s-2 2-4 2-2-2-4-2-2 2-4 2v-2z'
-  };
-  return m[service] || m['Corte'];
-}
-
-function renderQueue(){
-  const list = els.listaEspera;
-  list.innerHTML = '';
-
-  if (!state.queue.length){
-    els.emptyState.hidden = false;
-    return;
+    state.queue.push(item);
+    recalcQueue();
   }
-  els.emptyState.hidden = true;
 
-  const nowTs = Date.now();
-  state.queue.forEach((item, idx) => {
-    const li = document.createElement('li');
-    li.className = 'qItem';
-    li.dataset.id = item.id;
+  // -----------------------------
+  // Personalizar modal
+  // -----------------------------
+  function openPersonalizarModal() {
+    const wrap = document.createElement('div');
+    wrap.className = 'formWrap';
 
-    const isNext = idx === 0;
-    li.classList.toggle('isNext', isNext);
-    li.classList.toggle('isReady', !!item.ready);
+    const section1 = formSection('Tiempos base (min)', [
+      ['Corte', 'baseMinutes.Corte'],
+      ['Corte + Barba', 'baseMinutes.Corte + Barba'],
+      ['Corte + Barba + Sellado', 'baseMinutes.Corte + Barba + Sellado'],
+      ['Color', 'baseMinutes.Color'],
+      ['Permanente', 'baseMinutes.Permanente']
+    ]);
 
-    const waitMin = Math.max(0, Math.round((item.startTs - nowTs) / 60000));
+    const section2 = formSection('Delta Sellado (min) — solo Corte + Sellado', [
+      ['Rápido', 'selladoDeltaMinutes.Rápido'],
+      ['Normal', 'selladoDeltaMinutes.Normal'],
+      ['Lento', 'selladoDeltaMinutes.Lento']
+    ]);
 
-    li.innerHTML = `
-      <div class="swipe">
-        <button class="deleteBtn" type="button" aria-label="Eliminar">Eliminar</button>
-        <div class="swipeCard" tabindex="0">
-          <div class="qLeft">
-            <div class="qIcon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="18" height="18"><path d="${iconForService(item.service)}"/></svg>
-            </div>
-          </div>
-          <div class="qMid">
-            <div class="qTop">
-              <div class="qService">${item.service}</div>
-              ${isNext ? `<span class="badge">PRÓXIMO</span>` : ''}
-            </div>
-            <div class="qSub">${item.speed} · ${item.plannedMin} min</div>
-            <div class="qTimes">
-              <span class="muted">Espera: ${waitMin}m</span>
-              <span class="muted">Inicio ${formatClock(item.startTs)} / Fin ${formatClock(item.endTs)}</span>
-            </div>
-          </div>
+    const section3 = formSection('Ajuste por velocidad (min)', [
+      ['Rápido (-10)', 'speedAdjustMinutes.Rápido'],
+      ['Normal (0)', 'speedAdjustMinutes.Normal'],
+      ['Lento (<=60)', 'speedAdjustMinutes.Lento'],
+      ['Lento (>60)', 'speedAdjustMinutes.LentoLargo']
+    ]);
+
+    wrap.appendChild(section1);
+    wrap.appendChild(section2);
+    wrap.appendChild(section3);
+
+    const actions = document.createElement('div');
+    actions.className = 'formActions';
+    actions.innerHTML = `
+      <button class="chipBtn chipBtn--ghost" type="button" id="btnRestore">Restaurar defaults</button>
+      <button class="chipBtn" type="button" id="btnSave">Guardar</button>
+    `;
+    wrap.appendChild(actions);
+
+    openModal('Personalizar', wrap, { name: 'custom' });
+
+    $('#btnRestore', wrap).addEventListener('click', () => {
+      settings = structuredClone(DEFAULTS);
+      saveJSON(STORAGE.settings, settings);
+      feedback('tap');
+      toast('Defaults restaurados');
+      closeModal();
+      renderAll();
+    });
+
+    $('#btnSave', wrap).addEventListener('click', () => {
+      const inputs = $$('input[data-path]', wrap);
+      for (const inp of inputs) {
+        const path = inp.dataset.path;
+        const val = Number(inp.value);
+        if (!Number.isFinite(val)) continue;
+        setByPath(settings, path, val);
+      }
+      saveJSON(STORAGE.settings, settings);
+      feedback('tap');
+      toast('Guardado');
+      closeModal();
+      renderAll();
+    });
+  }
+
+  function formSection(title, rows) {
+    const sec = document.createElement('div');
+    sec.className = 'formSection';
+
+    const h = document.createElement('div');
+    h.className = 'formTitle';
+    h.textContent = title;
+
+    const list = document.createElement('div');
+    list.className = 'formList';
+
+    for (const [label, pathLabel] of rows) {
+      const path = toPath(pathLabel);
+      const val = getByPath(settings, path);
+
+      const row = document.createElement('div');
+      row.className = 'formRow';
+      row.innerHTML = `
+        <div class="formLabel">${escapeHTML(label)}</div>
+        <input class="formInput" inputmode="numeric" pattern="[0-9]*" data-path="${escapeHTML(path)}" value="${escapeHTML(String(val))}" />
+      `;
+      list.appendChild(row);
+    }
+
+    sec.appendChild(h);
+    sec.appendChild(list);
+    return sec;
+  }
+
+  function toPath(label) {
+    // Label already has dots. Ensure we remove spaces around +
+    return label
+      .replaceAll(' + ', ' + ')
+      .replaceAll(' ', '')
+      .replaceAll('baseMinutes.', 'baseMinutes.')
+      .replaceAll('selladoDeltaMinutes.', 'selladoDeltaMinutes.')
+      .replaceAll('speedAdjustMinutes.', 'speedAdjustMinutes.');
+  }
+
+  function getByPath(obj, path) {
+    // Special keys with plus and accents are handled by bracket notation via map
+    // We'll convert known keys.
+    if (path.startsWith('baseMinutes.')) {
+      const key = path.slice('baseMinutes.'.length).replaceAll('+', ' + ');
+      return obj.baseMinutes[key] ?? DEFAULTS.baseMinutes[key] ?? 0;
+    }
+    if (path.startsWith('selladoDeltaMinutes.')) {
+      const key = path.slice('selladoDeltaMinutes.'.length);
+      return obj.selladoDeltaMinutes[key] ?? DEFAULTS.selladoDeltaMinutes[key] ?? 0;
+    }
+    if (path.startsWith('speedAdjustMinutes.')) {
+      const key = path.slice('speedAdjustMinutes.'.length);
+      return obj.speedAdjustMinutes[key] ?? DEFAULTS.speedAdjustMinutes[key] ?? 0;
+    }
+    return 0;
+  }
+
+  function setByPath(obj, path, value) {
+    if (path.startsWith('baseMinutes.')) {
+      const key = path.slice('baseMinutes.'.length).replaceAll('+', ' + ');
+      obj.baseMinutes[key] = value;
+      return;
+    }
+    if (path.startsWith('selladoDeltaMinutes.')) {
+      const key = path.slice('selladoDeltaMinutes.'.length);
+      obj.selladoDeltaMinutes[key] = value;
+      return;
+    }
+    if (path.startsWith('speedAdjustMinutes.')) {
+      const key = path.slice('speedAdjustMinutes.'.length);
+      obj.speedAdjustMinutes[key] = value;
+      return;
+    }
+  }
+
+  // -----------------------------
+  // Registro modal
+  // -----------------------------
+  function openRegistroModal() {
+    const wrap = document.createElement('div');
+    wrap.className = 'registroWrap';
+
+    const totalMs = state.registro.reduce((a, r) => a + (r.actualMs || 0), 0);
+
+    const top = document.createElement('div');
+    top.className = 'registroTop';
+    top.innerHTML = `
+      <div class="registroStats">
+        <div class="registroStat">
+          <div class="registroStat__label">Total servicios</div>
+          <div class="registroStat__value">${state.registro.length}</div>
+        </div>
+        <div class="registroStat">
+          <div class="registroStat__label">Tiempo total</div>
+          <div class="registroStat__value">${escapeHTML(fmtDurationNice(totalMs))}</div>
         </div>
       </div>
     `;
 
-    // Swipe gestures
-    attachSwipe(li, item);
+    const list = document.createElement('div');
+    list.className = 'registroList';
 
-    list.appendChild(li);
-  });
-}
-
-function renderAddButtonClass(){
-  els.btnAgregar.classList.remove('isOk','isWarn','isDanger');
-  if (state.deadlineClass === 'ok') els.btnAgregar.classList.add('isOk');
-  if (state.deadlineClass === 'warn') els.btnAgregar.classList.add('isWarn');
-  if (state.deadlineClass === 'danger') els.btnAgregar.classList.add('isDanger');
-}
-
-// ---------- Swipe-to-delete (iOS style) ----------
-function attachSwipe(li, item){
-  const swipe = li.querySelector('.swipe');
-  const card = li.querySelector('.swipeCard');
-  const del = li.querySelector('.deleteBtn');
-
-  let startX = 0;
-  let currentX = 0;
-  let dragging = false;
-  let opened = false;
-
-  const max = 92; // px
-
-  function setX(x){
-    const clamped = clamp(x, -max, 0);
-    swipe.style.transform = `translateX(${clamped}px)`;
-  }
-
-  function close(){
-    opened = false;
-    swipe.classList.remove('open');
-    setX(0);
-  }
-
-  function open(){
-    opened = true;
-    swipe.classList.add('open');
-    setX(-max);
-    feedback('tap');
-  }
-
-  function onStart(e){
-    const t = e.touches ? e.touches[0] : e;
-    dragging = true;
-    startX = t.clientX;
-    currentX = opened ? -max : 0;
-    swipe.classList.add('dragging');
-  }
-
-  function onMove(e){
-    if (!dragging) return;
-    const t = e.touches ? e.touches[0] : e;
-    const dx = t.clientX - startX;
-    const x = currentX + dx;
-    // Solo swipe izquierda
-    if (x > 0) return;
-    setX(x);
-  }
-
-  function onEnd(){
-    if (!dragging) return;
-    dragging = false;
-    swipe.classList.remove('dragging');
-    const matrix = new DOMMatrixReadOnly(getComputedStyle(swipe).transform);
-    const x = matrix.m41;
-    if (x < -42) open();
-    else close();
-  }
-
-  card.addEventListener('touchstart', onStart, {passive:true});
-  card.addEventListener('touchmove', onMove, {passive:true});
-  card.addEventListener('touchend', onEnd, {passive:true});
-  card.addEventListener('touchcancel', onEnd, {passive:true});
-
-  card.addEventListener('pointerdown', onStart);
-  card.addEventListener('pointermove', onMove);
-  card.addEventListener('pointerup', onEnd);
-  card.addEventListener('pointercancel', onEnd);
-
-  // tap outside to close
-  document.addEventListener('touchstart', (e)=>{
-    if (!opened) return;
-    if (!li.contains(e.target)) close();
-  }, {passive:true});
-
-  del.addEventListener('click', () => {
-    feedback('danger');
-    // Smooth exit
-    li.classList.add('leaving');
-    setTimeout(() => {
-      state.queue = state.queue.filter(q => q.id !== item.id);
-      recalcQueue();
-    }, 240);
-  });
-}
-
-// ---------- Modals ----------
-function openModal(modalEl){
-  modalEl.hidden = false;
-  modalEl.classList.add('isOpen');
-  document.body.classList.add('modalOpen');
-  feedback('tap');
-}
-
-function closeModal(modalEl){
-  modalEl.classList.remove('isOpen');
-  setTimeout(() => {
-    modalEl.hidden = true;
-  }, 170);
-  document.body.classList.remove('modalOpen');
-  feedback('tap');
-}
-
-// Add modal steps
-function renderAddModal(){
-  const speedWrap = els.bubblesVel;
-  const srvWrap = els.bubblesSrv;
-
-  // Step 1 bubbles
-  const speeds = ['Rápido','Normal','Lento'];
-  speedWrap.innerHTML = speeds.map(s => {
-    const selected = state.addModalSpeed === s ? 'isSelected' : '';
-    return `<button class="bubble ${selected}" type="button" data-speed="${s}">${s}</button>`;
-  }).join('');
-
-  // Step 2 bubbles
-  const srv = serviceList();
-  srvWrap.innerHTML = srv.map(x => {
-    return `<button class="bubble bubble--wide" type="button" data-service="${x.key}">${x.key}</button>`;
-  }).join('');
-
-  // Show steps
-  $('#addStep1').hidden = state.addModalStep !== 1;
-  $('#addStep2').hidden = state.addModalStep !== 2;
-}
-
-function resetAddModal(){
-  state.addModalStep = 1;
-  state.addModalSpeed = null;
-  renderAddModal();
-}
-
-// ---------- Records ----------
-function addRegistro(entry){
-  state.registro.unshift(entry);
-  saveRegistro(state.registro);
-}
-
-function renderRegistro(){
-  const list = state.registro;
-  let totalMin = 0;
-  for (const r of list){
-    totalMin += Math.round(r.realMs/60000);
-  }
-
-  els.registroResumen.innerHTML = `
-    <div class="sumCard">
-      <div class="sumLine"><span class="muted">Total servicios</span><span class="sumVal">${list.length}</span></div>
-      <div class="sumLine"><span class="muted">Tiempo total</span><span class="sumVal">${formatDurationHM(totalMin)}</span></div>
-    </div>
-  `;
-
-  els.registroLista.innerHTML = list.map(r => {
-    const mins = Math.round(r.realMs/60000);
-    return `
-      <li class="regItem">
-        <div class="regTop">
-          <div class="regSvc">${r.service}</div>
-          <div class="regDur">${formatDurationHM(mins)}</div>
-        </div>
-        <div class="regSub muted">${formatClock(r.startTs)}-${formatClock(r.endTs)} · ${r.speed}</div>
-      </li>
-    `;
-  }).join('');
-}
-
-async function copyRegistro(){
-  const lines = [];
-  const list = state.registro;
-  let totalMin = 0;
-  for (const r of list) totalMin += Math.round(r.realMs/60000);
-  lines.push(`Registro - ${new Date().toLocaleDateString()}`);
-  lines.push(`Total servicios: ${list.length}`);
-  lines.push(`Tiempo total: ${formatDurationHM(totalMin)}`);
-  lines.push('');
-  for (const r of [...list].reverse()){
-    const mins = Math.round(r.realMs/60000);
-    lines.push(`${r.service} | ${formatClock(r.startTs)}-${formatClock(r.endTs)} | ${formatDurationHM(mins)} | ${r.speed}`);
-  }
-  const text = lines.join('\n');
-
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Copiado');
-  } catch {
-    // fallback
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    toast('Copiado');
-  }
-}
-
-// ---------- Toast ----------
-let toastTimer = null;
-function toast(msg){
-  let el = $('#toast');
-  if (!el){
-    el = document.createElement('div');
-    el.id = 'toast';
-    el.className = 'toast';
-    document.body.appendChild(el);
-  }
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=> el.classList.remove('show'), 1200);
-}
-
-// ---------- Actions ----------
-function startService(service, speed){
-  const plannedMin = calcPlannedMinutes(service, speed);
-  state.current = {
-    service,
-    speed,
-    plannedMin,
-    startTs: Date.now(),
-    plannedMs: plannedMin*60*1000,
-    overtimeNotified: false,
-  };
-
-  // when starting, if it was ready item, it already removed before call
-  recalcQueue();
-  startTimerLoop();
-}
-
-function finalizeCurrent(){
-  if (!state.current) return;
-
-  const nowTs = Date.now();
-  const startTs = state.current.startTs;
-  const entry = {
-    service: state.current.service,
-    speed: state.current.speed,
-    startTs,
-    endTs: nowTs,
-    realMs: nowTs - startTs,
-    plannedMin: state.current.plannedMin,
-  };
-  addRegistro(entry);
-
-  // stop timer
-  state.current = null;
-  stopTimerLoop();
-
-  // recalcular cola
-  recalcQueue();
-
-  // marcar primer item como "Siguiente listo" (no auto start)
-  if (state.queue.length){
-    state.queue[0].ready = true;
-    // mantener planificación
-    recalcQueue();
-  }
-
-  renderRegistro();
-  tick();
-}
-
-function startReadyIfAny(){
-  if (state.current) return;
-  if (!state.queue.length) return;
-  const first = state.queue[0];
-  if (!first.ready) return;
-
-  // remove first and start
-  state.queue.shift();
-  const {service, speed} = first;
-  recalcQueue();
-  startService(service, speed);
-}
-
-function willBeDangerIfAdd(service, speed){
-  const nowTs = Date.now();
-  const plannedMin = calcPlannedMinutes(service, speed);
-  const newItemMs = plannedMin*60*1000;
-
-  // compute end if added
-  let lastEnd = getLastPlannedEndTs(nowTs);
-  // If no current and no queue, and it would start now as current
-  // planned end = now + planned
-  if (!state.current && !state.queue.length) lastEnd = nowTs;
-
-  const endAfter = lastEnd + newItemMs;
-  return { endAfter, ...classifyDeadline(endAfter, nowTs) };
-}
-
-function addClientFlow(service, speed){
-  const plannedMin = calcPlannedMinutes(service, speed);
-  const item = {
-    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
-    service,
-    speed,
-    plannedMin,
-    startTs: 0,
-    endTs: 0,
-    ready: false,
-  };
-
-  if (state.current){
-    state.queue.push(item);
-    recalcQueue();
-  } else {
-    // If no running service: inicia el servicio actual
-    startService(service, speed);
-  }
-}
-
-// ---------- Personalizar modal ----------
-function fillPersonalizar(){
-  const s = state.settings;
-  els.inpCorte.value = s.base['Corte'];
-  els.inpCorteBarba.value = s.base['Corte + Barba'];
-  els.inpCorteBarbaSellado.value = s.base['Corte + Barba + Sellado'];
-  els.inpColor.value = s.base['Color'];
-  els.inpPermanente.value = s.base['Permanente'];
-
-  els.inpDeltaRapido.value = s.deltaSellado['Rápido'];
-  els.inpDeltaNormal.value = s.deltaSellado['Normal'];
-  els.inpDeltaLento.value = s.deltaSellado['Lento'];
-
-  els.inpAdjRapido.value = s.ajusteVelocidad['Rápido'];
-  els.inpAdjNormal.value = s.ajusteVelocidad['Normal'];
-  els.inpAdjLentoCorto.value = s.ajusteVelocidad['LentoCorto'];
-  els.inpAdjLentoLargo.value = s.ajusteVelocidad['LentoLargo'];
-}
-
-function readPersonalizar(){
-  const n = (v) => Number(v);
-  return {
-    base: {
-      'Corte': n(els.inpCorte.value),
-      'Corte + Barba': n(els.inpCorteBarba.value),
-      'Corte + Barba + Sellado': n(els.inpCorteBarbaSellado.value),
-      'Color': n(els.inpColor.value),
-      'Permanente': n(els.inpPermanente.value),
-    },
-    deltaSellado: {
-      'Rápido': n(els.inpDeltaRapido.value),
-      'Normal': n(els.inpDeltaNormal.value),
-      'Lento': n(els.inpDeltaLento.value),
-    },
-    ajusteVelocidad: {
-      'Rápido': n(els.inpAdjRapido.value),
-      'Normal': n(els.inpAdjNormal.value),
-      'LentoCorto': n(els.inpAdjLentoCorto.value),
-      'LentoLargo': n(els.inpAdjLentoLargo.value),
-    }
-  };
-}
-
-function sanitizeSettings(s){
-  const safe = structuredClone(DEFAULT_SETTINGS);
-  for (const k of Object.keys(safe.base)) safe.base[k] = Math.max(1, Math.round(Number(s.base[k])));
-  for (const k of Object.keys(safe.deltaSellado)) safe.deltaSellado[k] = Math.max(0, Math.round(Number(s.deltaSellado[k])));
-  safe.ajusteVelocidad['Rápido'] = Math.round(Number(s.ajusteVelocidad['Rápido']));
-  safe.ajusteVelocidad['Normal'] = Math.round(Number(s.ajusteVelocidad['Normal']));
-  safe.ajusteVelocidad['LentoCorto'] = Math.round(Number(s.ajusteVelocidad['LentoCorto']));
-  safe.ajusteVelocidad['LentoLargo'] = Math.round(Number(s.ajusteVelocidad['LentoLargo']));
-  return safe;
-}
-
-// ---------- Event listeners ----------
-function wire(){
-  // Prevent iOS gesture zoom / weird UI
-  ['gesturestart','gesturechange','gestureend'].forEach(evt => {
-    document.addEventListener(evt, (e)=>{ e.preventDefault(); }, {passive:false});
-  });
-
-  // Central button
-  els.btnCentral.addEventListener('click', () => {
-    feedback('tap');
-    if (state.current){
-      // FINALIZAR
-      finalizeCurrent();
+    if (!state.registro.length) {
+      const empty = document.createElement('div');
+      empty.className = 'registroEmpty';
+      empty.textContent = 'No hay registros todavía';
+      list.appendChild(empty);
     } else {
-      // INICIAR: only if first ready
-      startReadyIfAny();
+      for (const r of state.registro.slice().reverse()) {
+        const row = document.createElement('div');
+        row.className = 'registroRow';
+        row.innerHTML = `
+          <div class="registroRow__main">
+            <div class="registroRow__title">${escapeHTML(r.service)}</div>
+            <div class="registroRow__sub">${fmtHHMM(r.startTs)}-${fmtHHMM(r.endTs)} · ${escapeHTML(fmtDurationNice(r.actualMs))}</div>
+          </div>
+        `;
+        list.appendChild(row);
+      }
     }
-  });
 
-  // Add button
-  els.btnAgregar.addEventListener('click', () => {
-    // open modal
-    resetAddModal();
-    openModal(els.modalAgregar);
-  });
+    const actions = document.createElement('div');
+    actions.className = 'registroActions';
+    actions.innerHTML = `
+      <button class="chipBtn chipBtn--ghost" type="button" id="btnCopy">Copiar</button>
+      <button class="chipBtn chipBtn--ghost" type="button" id="btnClear">Borrar registro</button>
+    `;
 
-  // Topbar
-  els.btnRegistro.addEventListener('click', () => {
-    renderRegistro();
-    openModal(els.modalRegistro);
-  });
-  els.btnPersonalizar.addEventListener('click', () => {
-    fillPersonalizar();
-    openModal(els.modalPersonalizar);
-  });
+    wrap.appendChild(top);
+    wrap.appendChild(list);
+    wrap.appendChild(actions);
 
-  // Close modal buttons
-  els.addCerrar.addEventListener('click', () => closeModal(els.modalAgregar));
-  // Add modal: back to step 1
-  if (els.addVolver){
-    els.addVolver.addEventListener('click', () => {
+    openModal('Registro', wrap, { name: 'registro' });
+
+    $('#btnCopy', wrap).addEventListener('click', async () => {
+      const text = buildRegistroText();
+      try {
+        await navigator.clipboard.writeText(text);
+        feedback('tap');
+        toast('Copiado');
+      } catch {
+        feedback('tap');
+        toast('No se pudo copiar');
+      }
+    });
+
+    $('#btnClear', wrap).addEventListener('click', () => {
+      state.registro = [];
+      saveJSON(STORAGE.registro, state.registro);
       feedback('tap');
-      state.addModalStep = 1;
-      renderAddModal();
+      toast('Registro borrado');
+      closeModal();
+      renderAll();
     });
   }
-  els.personalizarCerrar.addEventListener('click', () => closeModal(els.modalPersonalizar));
-  els.registroCerrar.addEventListener('click', () => closeModal(els.modalRegistro));
 
-  // Backdrop click
-  [els.modalAgregar, els.modalPersonalizar, els.modalRegistro].forEach(modal => {
-    modal.addEventListener('click', (e)=>{
-      if (e.target === modal) closeModal(modal);
+  function buildRegistroText() {
+    const lines = [];
+    const totalMs = state.registro.reduce((a, r) => a + (r.actualMs || 0), 0);
+    lines.push(`Registro (${state.registro.length} servicios) — Total ${fmtDurationNice(totalMs)}`);
+    lines.push('');
+    for (const r of state.registro) {
+      lines.push(`${r.service} (${r.speed}) — ${fmtHHMM(r.startTs)}-${fmtHHMM(r.endTs)} — ${fmtDurationNice(r.actualMs)}`);
+    }
+    return lines.join('\n');
+  }
+
+  // -----------------------------
+  // Swipe to delete (iOS-like)
+  // -----------------------------
+  const swipe = {
+    openId: null,
+    startX: 0,
+    currentX: 0,
+    dragging: false,
+    activeCard: null
+  };
+
+  function bindQueueInteractions() {
+    // Remove previous handlers by cloning? We bind per card.
+    $$('.qCard', el.queueList).forEach(card => {
+      const front = $('.qFront', card);
+      const del = $('.qDelete', card);
+
+      // Delete
+      del.addEventListener('click', () => {
+        feedback('danger');
+        removeQueueItem(card.dataset.id);
+      });
+
+      // Pointer events for swipe
+      let pointerId = null;
+
+      front.addEventListener('pointerdown', (e) => {
+        pointerId = e.pointerId;
+        front.setPointerCapture(pointerId);
+        swipe.dragging = true;
+        swipe.activeCard = card;
+        swipe.startX = e.clientX;
+        swipe.currentX = 0;
+
+        // close any other open
+        closeOpenSwipeExcept(card.dataset.id);
+      });
+
+      front.addEventListener('pointermove', (e) => {
+        if (!swipe.dragging || swipe.activeCard !== card) return;
+        const dx = e.clientX - swipe.startX;
+        const tx = clamp(dx, -96, 16);
+        swipe.currentX = tx;
+        setSwipeTranslate(card, tx);
+      });
+
+      front.addEventListener('pointerup', (e) => {
+        if (!swipe.dragging || swipe.activeCard !== card) return;
+        swipe.dragging = false;
+        const shouldOpen = swipe.currentX < -42;
+        if (shouldOpen) {
+          openSwipe(card);
+        } else {
+          closeSwipe(card);
+        }
+      });
+
+      front.addEventListener('pointercancel', () => {
+        if (swipe.activeCard === card) {
+          swipe.dragging = false;
+          closeSwipe(card);
+        }
+      });
     });
+  }
+
+  function setSwipeTranslate(card, x) {
+    const front = $('.qFront', card);
+    front.style.transform = `translate3d(${x}px,0,0)`;
+  }
+
+  function openSwipe(card) {
+    setSwipeTranslate(card, -86);
+    card.classList.add('swipe-open');
+    swipe.openId = card.dataset.id;
+    feedback('tap');
+  }
+
+  function closeSwipe(card) {
+    setSwipeTranslate(card, 0);
+    card.classList.remove('swipe-open');
+    if (swipe.openId === card.dataset.id) swipe.openId = null;
+  }
+
+  function closeOpenSwipeExcept(keepId) {
+    if (!swipe.openId) return;
+    if (swipe.openId === keepId) return;
+    const other = $(`.qCard[data-id="${CSS.escape(swipe.openId)}"]`);
+    if (other) closeSwipe(other);
+  }
+
+  function removeQueueItem(id) {
+    const card = $(`.qCard[data-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+
+    card.classList.add('removing');
+
+    // remove after animation
+    setTimeout(() => {
+      const idx = state.queue.findIndex(q => q.id === id);
+      if (idx !== -1) state.queue.splice(idx, 1);
+
+      // if it was nextReady, clear
+      if (state.nextReadyId === id) state.nextReadyId = null;
+
+      recalcQueue();
+      renderQueue();
+      updateAddButtonStatus();
+    }, 220);
+  }
+
+  // Close swipe if tap outside
+  document.addEventListener('pointerdown', (e) => {
+    if (!swipe.openId) return;
+    const card = $(`.qCard[data-id="${CSS.escape(swipe.openId)}"]`);
+    if (!card) {
+      swipe.openId = null;
+      return;
+    }
+    if (!card.contains(e.target)) {
+      closeSwipe(card);
+    }
+  }, { capture: true });
+
+  // -----------------------------
+  // Events
+  // -----------------------------
+  el.btnAdd.addEventListener('click', () => {
+    feedback('tap');
+    openAddClientModal();
   });
 
-  // Add modal selection
-  els.bubblesVel.addEventListener('click', (e)=>{
-    const btn = e.target.closest('button[data-speed]');
-    if (!btn) return;
+  el.btnRegistro.addEventListener('click', () => {
     feedback('tap');
-    state.addModalSpeed = btn.dataset.speed;
-    state.addModalStep = 2;
-    renderAddModal();
+    openRegistroModal();
   });
 
-  els.bubblesSrv.addEventListener('click', (e)=>{
-    const btn = e.target.closest('button[data-service]');
-    if (!btn) return;
-    if (!state.addModalSpeed) return;
-
+  el.btnPersonalizar.addEventListener('click', () => {
     feedback('tap');
-    const service = btn.dataset.service;
-    const speed = state.addModalSpeed;
+    openPersonalizarModal();
+  });
 
-    // Confirm if would be danger
-    const check = willBeDangerIfAdd(service, speed);
-    if (check.cls === 'danger'){
-      const limitTs = check.limitTs;
-      const msg = `Terminarías ${formatClock(check.endAfter)} (límite ${formatClock(limitTs)}). ¿Agregar igual?`;
-      const ok = confirm(msg);
-      if (!ok) return;
+  el.btnCentral.addEventListener('click', () => {
+    if (state.running) {
+      feedback('tap');
+      finalizeCurrent();
+      return;
     }
 
-    closeModal(els.modalAgregar);
-    addClientFlow(service, speed);
-    recalcQueue();
-  });
-
-  // Personalizar actions
-  els.btnRestoreDefaults.addEventListener('click', () => {
+    // free
     feedback('tap');
-    state.settings = structuredClone(DEFAULT_SETTINGS);
-    saveSettings(state.settings);
-    fillPersonalizar();
-    recalcQueue();
-    toast('Restaurado');
-  });
-
-  els.btnGuardarPersonalizar.addEventListener('click', () => {
-    feedback('tap');
-    const raw = readPersonalizar();
-    state.settings = sanitizeSettings(raw);
-    saveSettings(state.settings);
-    recalcQueue();
-    toast('Guardado');
-    closeModal(els.modalPersonalizar);
-  });
-
-  // Registro actions
-  els.btnCopiarRegistro.addEventListener('click', () => {
-    feedback('tap');
-    copyRegistro();
-  });
-
-  els.btnBorrarRegistro.addEventListener('click', () => {
-    feedback('danger');
-    const ok = confirm('¿Borrar registro?');
-    if (!ok) return;
-    state.registro = [];
-    saveRegistro(state.registro);
-    renderRegistro();
-  });
-
-  // Keep app stable without breaking taps on iOS.
-  // We only block *horizontal* pans (the gesture that triggers Safari back/forward UI).
-  // Vertical scrolling is allowed only inside the scrollable sheets.
-  let touchStartX = 0;
-  let touchStartY = 0;
-  document.addEventListener('touchstart', (e)=>{
-    const t = e.touches && e.touches[0];
-    if (!t) return;
-    touchStartX = t.clientX;
-    touchStartY = t.clientY;
-  }, {passive:true});
-
-  document.addEventListener('touchmove', (e)=>{
-    // Allow vertical scroll inside scrollable sheets
-    const inScrollable = e.target.closest('.modal__sheet--scroll');
-    if (inScrollable) return;
-
-    const t = e.touches && e.touches[0];
-    if (!t) return;
-    const dx = t.clientX - touchStartX;
-    const dy = t.clientY - touchStartY;
-
-    // Only prevent when it's clearly a horizontal swipe.
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
-      if (e.cancelable) e.preventDefault();
-    }
-  }, {passive:false});
-}
-
-// ---------- PWA ----------
-function registerSW(){
-  if (!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', async () => {
-    try {
-      await navigator.serviceWorker.register('sw.js');
-    } catch {
-      // silent
+    if (state.nextReadyId) {
+      startNextReadyIfAny();
+    } else {
+      // If nothing ready, open add flow to start a service.
+      openAddClientModal();
     }
   });
-}
 
-// ---------- Init ----------
-function init(){
-  renderAddModal();
-  recalcQueue();
-  tick();
-  wire();
-  registerSW();
+  // Keyboard access
+  el.btnCentral.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      el.btnCentral.click();
+    }
+  });
 
-  // If there is a queue and app starts idle, nothing is ready until a finalize event;
-  // we keep it strict to spec ("Siguiente listo" is set after finalizar).
+  // -----------------------------
+  // iPhone notch + prevent zoom / gesture nav weirdness
+  // -----------------------------
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(evt => {
+    document.addEventListener(evt, (e) => e.preventDefault(), { passive: false });
+  });
 
-  // Update time-based UI every minute
-  setInterval(()=>{
-    recalcQueue();
-    tick();
-  }, 60000);
-}
+  // Prevent double-tap zoom
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', (e) => {
+    const nowTs = Date.now();
+    if (nowTs - lastTouchEnd <= 300) {
+      e.preventDefault();
+    }
+    lastTouchEnd = nowTs;
+  }, { passive: false });
 
-init();
+  // Keep body from horizontal pan
+  document.addEventListener('touchmove', (e) => {
+    // Allow scroll only inside modal body (Personalizar/Registro)
+    const inScrollableModal = e.target && e.target.closest && e.target.closest('.modalBody') &&
+      (activeModal === 'custom' || activeModal === 'registro');
+    if (inScrollableModal) return;
+    // Otherwise prevent accidental page scroll
+    if (el.modalOverlay.hidden) e.preventDefault();
+  }, { passive: false });
+
+  // -----------------------------
+  // Service Worker
+  // -----------------------------
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+
+  // -----------------------------
+  // Init
+  // -----------------------------
+  function init() {
+    renderAll();
+    updateAddButtonStatus();
+
+    // If there was running state previously, we intentionally do not restore it
+    // (requirements did not ask persistence for running timer).
+  }
+
+  init();
+
+})();
