@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0B0F14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Barber Turnos" />
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <title>Barber Turnos (VIP)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+  <header class="topbar">
+      <div class="topbar-actions">
+        <button id="logBtn" class="topbar-btn" type="button" aria-label="Registro">
+          <span class="topbar-ic" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M7 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M7 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="topbar-tx">Registro</span>
+        </button>
+        <button id="settingsBtn" class="topbar-btn" type="button" aria-label="Personalizar">
+          <span class="topbar-ic" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/>
+              <path d="M19.4 15a8.9 8.9 0 0 0 .1-1 8.9 8.9 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a8.7 8.7 0 0 0-1.7-1l-.4-2.6H9.1L8.7 7a8.7 8.7 0 0 0-1.7 1l-2.4-1-2 3.4L4.6 13a8.9 8.9 0 0 0-.1 1 8.9 8.9 0 0 0 .1 1l-2 1.6 2 3.4 2.4-1c.5.4 1.1.7 1.7 1l.4 2.6h5.8l.4-2.6c.6-.3 1.2-.6 1.7-1l2.4 1 2-3.4-2-1.6Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="topbar-tx">Personalizar</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- HERO / ARO CENTRAL -->
+    <section class="hero">
+      <button id="ringBtn" class="ring" type="button" aria-label="Iniciar o finalizar servicio" data-mode="normal">
+        <div class="ring-ambient" aria-hidden="true"></div>
+        <div class="ring-halo" aria-hidden="true"></div>
+
+        <svg class="ring-svg" viewBox="0 0 200 200" aria-hidden="true">
+          <defs>
+            <!-- Gradientes (UI only) -->
+            <linearGradient id="ringCyan" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#4FD1FF" stop-opacity="1"/>
+              <stop offset="55%" stop-color="#1FB9FF" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#BDEFFF" stop-opacity="1"/>
+            </linearGradient>
+            <linearGradient id="ringRed" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FF2B4A" stop-opacity="1"/>
+              <stop offset="60%" stop-color="#8A0F1D" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#FF6B7F" stop-opacity="1"/>
+            </linearGradient>
+
+            <filter id="glowIce" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="3.5" result="blur"/>
+              <feColorMatrix in="blur" type="matrix"
+                values="1 0 0 0 0
+                        0 1 0 0 0
+                        0 0 1 0 0
+                        0 0 0 2.4 0" result="boost"/>
+              <feMerge>
+                <feMergeNode in="boost"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+
+            <filter id="glowRed" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="4.2" result="blur"/>
+              <feColorMatrix in="blur" type="matrix"
+                values="1 0 0 0 0
+                        0 1 0 0 0
+                        0 0 1 0 0
+                        0 0 0 2.8 0" result="boost"/>
+              <feMerge>
+                <feMergeNode in="boost"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+
+          <circle class="ring-track" cx="100" cy="100" r="78"></circle>
+          <circle id="ringProgress" class="ring-progress" cx="100" cy="100" r="78"></circle></svg>
+
+        <div class="ring-content">
+          <div id="ringState" class="ring-state">INICIAR</div>
+          <div id="ringTime" class="ring-time">--:--</div>
+          <div id="ringEnd" class="ring-end">Termina --:--</div>
+          <div id="ringMeta" class="ring-meta">Libre</div>
+        </div>
+      </button>
+    </section>
+
+    <!-- BOTON AGREGAR CLIENTE -->
+    <div class="below-hero">
+      <button id="addClientBtn" class="pill-btn" type="button" data-state="ok">+ Agregar cliente</button>
+    </div>
+
+    <!-- (MVP) Lista de espera -->
+    <div class="queue-wrap">
+      <div class="queue-title">En espera</div>
+      <div id="queueList" class="queue-list"></div>
+    </div>
+
+    <!-- MODAL NUEVO CLIENTE -->
+    <div id="clientModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-grab" aria-hidden="true"></div>
+
+        <div class="modal-header">
+          <div class="modal-titlewrap">
+            <div id="modalTitle" class="modal-title">Nuevo cliente</div>
+            <div id="modalSubtitle" class="modal-subtitle">Elegí velocidad</div>
+          </div>
+          <button id="modalCloseBtn" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+
+        <!-- PASO 1: VELOCIDAD -->
+        <div id="stepSpeed" class="step">
+          <div class="bubble-row">
+            <button class="bubble bubble-ice" data-speed="fast" type="button">Rápido</button>
+            <button class="bubble bubble-ice" data-speed="normal" type="button">Normal</button>
+            <button class="bubble bubble-ice" data-speed="slow" type="button">Lento</button>
+          </div>
+          <div class="hint">Rápido: –10 min · Normal: igual · Lento: +10 / +15 min</div>
+        </div>
+
+        <!-- PASO 2: SERVICIO -->
+        <div id="stepService" class="step is-hidden">
+          <div class="bubble-grid">
+            <button class="bubble bubble-ice" data-service="cut" type="button">Corte</button>
+            <button class="bubble bubble-ice" data-service="cutBeard" type="button">Corte + Barba</button>
+            <button class="bubble bubble-ice" data-service="cutSeal" type="button">Corte + Sellado</button>
+            <button class="bubble bubble-ice" data-service="cutBeardSeal" type="button">Corte + Barba + Sellado</button>
+            <button class="bubble bubble-ice" data-service="color" type="button">Color</button>
+            <button class="bubble bubble-ice" data-service="perm" type="button">Permanente</button>
+          </div>
+
+          <div class="summary">
+            <span class="chip" id="chipSpeed">Velocidad: —</span>
+            <span class="chip" id="chipHint">Elegí un servicio</span>
+          </div>
+        </div>
+
+        <!-- ALERTA HORARIO -->
+        <div id="limitAlert" class="alert is-hidden" role="alert">
+          <div class="alert-title">⚠️ Te hace salir tarde</div>
+          <div id="alertMsg" class="alert-msg">—</div>
+          <div class="alert-actions">
+            <button id="alertCancel" class="btn-ghost" type="button">Cancelar</button>
+            <button id="alertOk" class="btn-danger" type="button">Agregar igual</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL PERSONALIZAR TIEMPOS -->
+    <div id="settingsModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="modal-grab" aria-hidden="true"></div>
+        <div class="modal-header">
+          <div class="modal-titlewrap">
+            <div id="settingsTitle" class="modal-title">Personalizar</div>
+            <div class="modal-subtitle">Ajustá los tiempos base (Normal) y el sellado</div>
+          </div>
+          <button id="settingsCloseBtn" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+
+        <div class="form">
+          <div class="form-section">
+            <div class="form-label">Servicios (Normal)</div>
+
+            <div class="form-row">
+              <div class="form-name">Corte</div>
+              <input id="set_cut" type="number" inputmode="numeric" min="1" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Corte + Barba</div>
+              <input id="set_cutBeard" type="number" inputmode="numeric" min="1" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Corte + Barba + Sellado</div>
+              <input id="set_cutBeardSeal" type="number" inputmode="numeric" min="1" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Color</div>
+              <input id="set_color" type="number" inputmode="numeric" min="1" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Permanente</div>
+              <input id="set_perm" type="number" inputmode="numeric" min="1" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-label">Sellado (extra sobre Corte)</div>
+            <div class="form-row">
+              <div class="form-name">Rápido</div>
+              <input id="set_seal_fast" type="number" inputmode="numeric" min="0" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Normal</div>
+              <input id="set_seal_normal" type="number" inputmode="numeric" min="0" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Lento</div>
+              <input id="set_seal_slow" type="number" inputmode="numeric" min="0" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-label">Velocidad (ajuste)</div>
+            <div class="hint">Rápido resta. Lento suma (cortos: +10, largos: +15).</div>
+            <div class="form-row">
+              <div class="form-name">Rápido</div>
+              <input id="set_fast_delta" type="number" inputmode="numeric" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Lento (corto ≤60)</div>
+              <input id="set_slow_short" type="number" inputmode="numeric" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+            <div class="form-row">
+              <div class="form-name">Lento (largo &gt;60)</div>
+              <input id="set_slow_long" type="number" inputmode="numeric" step="1" class="form-input" />
+              <div class="form-unit">min</div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button id="settingsResetBtn" class="btn-ghost" type="button">Restablecer</button>
+            <button id="settingsSaveBtn" class="btn-primary" type="button">Guardar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL REGISTRO -->
+    <div id="logModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop" data-close="true"></div>
+      <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="logTitle">
+        <div class="modal-grab" aria-hidden="true"></div>
+        <div class="modal-header">
+          <div class="modal-titlewrap">
+            <div id="logTitle" class="modal-title">Registro</div>
+            <div id="logSubtitle" class="modal-subtitle">Resumen del día</div>
+          </div>
+          <button id="logCloseBtn" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+
+        <div class="log-summary">
+          <div class="log-card">
+            <div class="log-k">Clientes</div>
+            <div id="logClients" class="log-v">0</div>
+          </div>
+          <div class="log-card">
+            <div class="log-k">Tiempo</div>
+            <div id="logTotal" class="log-v">0m</div>
+          </div>
+        </div>
+
+        <div id="logList" class="log-list"></div>
+
+        <div class="form-actions">
+          <button id="logClearBtn" class="btn-ghost" type="button">Borrar día</button>
+          <button id="logCopyBtn" class="btn-primary" type="button">Copiar</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
